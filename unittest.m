@@ -60,7 +60,7 @@ assert IsHyperbolic(m, T);
 assert IsHyperbolic(n, T);
 
 assert IsElliptic(M![[1, 3], [0, 2]], T);
-assert IsElliptic(M![[1, 2], [3, -1]], T);
+assert IsElliptic(M![[1, 5], [1/5, 2]], T);
 
 /* Discreteness tests */
 
@@ -115,3 +115,16 @@ gens := SL2KGens([M![[2, 3], [1, 2]]], p);
 RecognizeDiscreteFree(gens);
 assert not IsDiscreteFree(gens);
 assert IsElliptic(gens`witness, gens`tree);
+
+// Discreteness
+
+Q := RationalsAsNumberField();
+M := MatrixAlgebra(Q, 2);
+
+A := M![0, 9, -1/9, 1];
+B := M![9, 2, 1, 1/3];
+
+G := SL2KGens([A, B], 3);
+H, S, p := TorsionFreeSubgroup(G);
+assert p eq 5;
+assert &and[IsHyperbolic(g, G`tree) or IsOne(g) or IsOne(-g) : g in Generators(H)];
