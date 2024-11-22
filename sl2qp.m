@@ -129,7 +129,7 @@ end intrinsic;
 intrinsic 'eq'(v::BTTVert, w::BTTVert) -> BoolElt
 {Returns whether two vertices are equal.}
     u := UniformizingElement(Parent(v));
-    return Precision(v) eq Precision(w) and IsIntegral((Value(v) - Value(w))/u^Precision(v));
+    return Precision(v) eq Precision(w) and Valuation(Value(v) - Value(w), Place(Parent(v))) ge Precision(v);
 end intrinsic;
 
 intrinsic '*'(v::BTTVert, M::AlgMatElt[FldNum]) -> BTTVert
@@ -154,13 +154,41 @@ intrinsic DistanceToOrigin(v::BTTVert) -> RngIntElt
     return Precision(v) - 2*Minimum(Minimum(Valuation(Value(v), P), Precision(v)), 0);
 end intrinsic;
 
+intrinsic EdgeSeq(v::BTTVert) -> SeqEnum[ModAlgElt[FldNum]]
+{Returns the sequence of edge types from the origin to a vertex. The edge types are representatives
+of the rank 1 subspaces of k^2, where k is the residue field of the place.}
+    T := Parent(v);
+
+    K := Field(T);
+    k, f := ResidueClassField(Ideal(T));
+    u := UniformizingElement(T);
+    V := VectorSpace(k, 2);
+
+    precision := Precision(v);
+    value := Value(v);
+
+    // Displacement of projection to the main axis.
+    axisDisplacement := Minimum(Valuation(Value(v), Place(T)), Precision(v));
+    x := axisDisplacement lt 0 select V![0, 1] else V![1, 0];
+    path := [x : i in [1..Abs(axisDisplacement)]];
+
+    if precision eq axisDisplacement then return path; end if; // Small optimisation.
+
+    value /:= u^axisDisplacement;
+    for i in [1..precision - axisDisplacement] do
+        residue := f(value);
+        Append(~path, V![1, residue]);
+        value := (value - (f^-1)(residue))/u;
+    end for;
+    
+    return path;
+end intrinsic;
+
 intrinsic CmpVertices(v, w) -> RngIntElt
 {Compares two vertices lexicographically.}
     if v eq w then return 0; end if;
-    T := Parent(v);
 
-    P := Place(T);
-    // Compare the lengths
+    // Compare the lengths.
     l1 := DistanceToOrigin(v);
     l2 := DistanceToOrigin(w);
     if l1 lt l2 then
@@ -169,31 +197,17 @@ intrinsic CmpVertices(v, w) -> RngIntElt
         return 1;
     end if;
 
-    // Projection of the paths along the main axis.
-    vproj := Minimum(Valuation(Value(v), P), Precision(v));
-    wproj := Minimum(Valuation(Value(w), P), Precision(w));
-    
-    // If has smaller displacement along the main axis, it is smaller.
-    if vproj lt wproj then
-        return -1;
-    elif vproj gt wproj then
-        return 1;
-    end if;
-
-    // Compare the first edge at which they differ.
-    d := Value(v) - Value(w);
-    val := Valuation(d, P);
-
-    u := UniformizingElement(T);
-    Fp, f := ResidueClassField(Ideal(T));
-    e1 := f(Value(v)/u^val);
-    e2 := f(Value(w)/u^val);
-    if e1 lt e2 then
-        return -1;
-    elif e1 gt e2 then
-        return 1;
-    end if;
-    error "Unreachable state: vertices were equal but comparison failed";
+    // Compare the edge sequences.
+    seq1 := EdgeSeq(v);
+    seq2 := EdgeSeq(w);
+    for i in [1..#seq1] do
+        if seq1[i] lt seq2[i] then
+            return -1;
+        elif seq1[i] gt seq2[i] then
+            return 1;
+        end if;
+    end for;
+    return 0;
 end intrinsic;
 
 /* The vertex halfway between the origin and v */
@@ -253,6 +267,11 @@ intrinsic IsElliptic(M::AlgMatElt[FldNum], T::BTTree) -> BoolElt
     return 2*Valuation(Trace(M), Place(T)) gt Valuation(Determinant(M), Place(T));
 end intrinsic;
 
+intrinsic IsHyperbolic(M::AlgMatElt[FldNum], T::BTTree) -> BoolElt
+{Returns whether a matrix is hyperbolic.}
+    return not IsElliptic(M, T);
+end intrinsic;
+
 /**
  * Discreteness algorithms
  */
@@ -263,7 +282,7 @@ function evaluate_word(word_ids, seq)
 end function;
 
 /* Get the symmetric sequence of generators and inverses. */
-symmetrize := function(gens)
+function symmetrize(gens)
   gens_sym := &cat[[x, x^-1] : x in gens];
   if Nresults() eq 1 then return gens_sym; end if;
   S := Sym(#gens_sym);
@@ -272,7 +291,7 @@ symmetrize := function(gens)
 end function;
 
 /* A generating set for a subgroup of SL2 over a non-Archimedean local field. */
-declare type GrpSL2pGen;
+declare type GrpSL2KGen;
 declare attributes GrpSL2KGen:
     field, // Base field
     matalg, // Matrix Algebra
@@ -301,29 +320,35 @@ declare attributes GrpSL2KGen:
     matgrp, // Matrix group (with reduced generating set)
     iso; // Isometry to finitely presented group
 
+intrinsic SL2KGens(seq::SeqEnum[AlgMatElt[FldNum]], place::PlcNumElt : psl := false) -> GrpSL2KGen
+{ Create a generating set for a subgroup of SL2 over an algebraic number field at a finite place. }
+    gen := New(GrpSL2KGen);
+    require IsFinite(place): "Place must be finite";
+    require Degree(Universe(seq)) eq 2: "Matrix algebra must be degree 2";
+    require &and[Determinant(g) eq 1 : g in seq]: "Matrices must have determinant 1";
+    require BaseRing(Universe(seq)) eq NumberField(place): "Generators and place must have the same base field";
+    gen`seq := seq;
+    gen`matalg := Universe(seq);
+    gen`field := BaseRing(gen`matalg);
+    gen`tree := BruhatTitsTree(place);
+    gen`psl := psl;
+    gen`has_neg := false;
+
+    gen`type := "un";
+    gen`witness := seq;
+    gen`witness_word := Setseq(Generators(FreeGroup(#seq)));
+    return gen;
+end intrinsic;
+
+intrinsic SL2KGens(seq::SeqEnum[AlgMatElt[FldNum]], p::RngIntElt : psl := false) -> GrpSL2KGen
+{ Create a generating set for a subgroup of SL2 over an algebraic number field at a finite place. }
+    return SL2KGens(seq, Decomposition(BaseRing(Universe(seq)), p)[1][1]: psl := psl);
+end intrinsic;
+
 intrinsic Print(gen::GrpSL2KGen)
 { Print the generating set. }
-list := &*[Sprint(x) * (i lt #gen`seq select "\n\n" else "") : i -> x in gen`seq];
-printf "Generators of subgroup of %oSL2 over non-Archimedean field:\n%o", gen`psl select "P" else "", gen`field, list;
-end intrinsic;
-intrinsic SL2KGens(seq::SeqEnum[AlgMatElt[FldNum]], place::PlcNumElt : psl := false) -> GrpSL2Gen
-{ Create a generating set for a subgroup of SL2 over an algebraic number field at a finite place. }
-  gen := New(GrpSL2KGen);
-  require IsFinite(place): "Place must be finite";
-  require Degree(Universe(seq)) eq 2: "Matrix algebra must be degree 2";
-  require &and[Determinant(g) eq 1 : g in seq]: "Matrices must have determinant 1";
-  require BaseRing(Universe(seq)) eq NumberField(place): "Generators and place must have the same base field";
-  gen`seq := seq;
-  gen`matalg := Universe(seq);
-  gen`field := BaseRing(gen`matalg);
-  gen`tree := BruhatTitsTree(place);
-  gen`psl := psl;
-  gen`has_neg := false;
-
-  gen`type := "un";
-  gen`witness := seq;
-  gen`witness_word := Setseq(Generators(FreeGroup(#seq)));
-  return gen;
+    list := &*[Sprint(x) * (i lt #gen`seq select "\n\n" else "") : i -> x in gen`seq];
+    printf "Generators of subgroup of %oSL2 over non-Archimedean field:\n%o", gen`psl select "P" else "", list;
 end intrinsic;
 
 /* Apply one step of the reduction algorithm. */
@@ -331,7 +356,7 @@ procedure reduce_step(gen)
     if gen`type ne "un" then return; end if;
 
     // Deal with elliptic, I, and -I elements.
-    for i -> g in gen`seq do
+    for i -> g in gen`witness do
         if IsOne(g) or IsOne(-g) then
             if IsOne(-g) and not gen`psl and not gen`has_neg then
                 gen`has_neg := true;
@@ -340,7 +365,7 @@ procedure reduce_step(gen)
             Remove(~gen`witness, i);
             Remove(~gen`witness_word, i);
             return;
-        elif is_elliptic(g, tree) then
+        elif IsElliptic(g, gen`tree) then
             gen`type := "el";
             gen`witness := g;
             gen`witness_word := gen`witness_word[i];
@@ -364,11 +389,11 @@ procedure reduce_step(gen)
         for j -> y in gens_sym do
             if Ceiling(i/2) eq Ceiling(j/2) then continue; end if;
             z := x*y;
-            if CmpIsometry(x, z) eq 1 then
-                x := z;
+            if CmpIsometry(z, x, gen`tree) eq -1 then
                 id := Ceiling(i/2);
                 gen`witness[id] := z;
                 gen`witness_word[id] := words_sym[i]*words_sym[j];
+                return;
             end if;
         end for;
     end for;
@@ -381,7 +406,7 @@ procedure reduce_step(gen)
     end if;
 end procedure;
 
-intrinsic RecognizeDiscreteFree(gen::GrpSL2KGen) -> GrpSL2KGen
+intrinsic RecognizeDiscreteFree(gen::GrpSL2KGen)
 { Decide if a finite subset of SL2 over a non-Archimedean local field is discrete and free.
 Modifies the attributes of the input generating set. }
     repeat
@@ -436,6 +461,13 @@ intrinsic HasNegativeOne(gen::GrpSL2KGen) -> FldNum, GrpFPElt
     end if;
 end intrinsic;
 
+intrinsic FreeRank(gen::GrpSL2KGen) -> RngIntElt
+{ The rank of a discrete free group, not including -1 as a generator. }
+    error if gen`type eq "un", "The group must be prepared using `RecognizeDiscreteFree`";
+    error if not IsDiscreteFree(gen), "The group is not discrete and free";
+    return #gen`witness;
+end intrinsic;
+
 intrinsic Rank(gen::GrpSL2KGen) -> RngIntElt
 { The rank of a discrete free group. }
     error if gen`type eq "un", "The group must be prepared using `RecognizeDiscreteFree`";
@@ -450,7 +482,7 @@ intrinsic IsElementOf(g::AlgMatElt[FldNum], gen::GrpSL2KGen) -> BoolElt, GrpFPEl
 
     gen_sym := symmetrize(gen`witness);
     G := gen`FPgrp;
-    fp_sym := symmetrize(Setseq(Generators(G)));
+    fp_sym := symmetrize([G.i : i in [1..Ngens(G)]]);
     g_word := Id(G);
     o := Origin(gen`tree);
     repeat
@@ -460,7 +492,7 @@ intrinsic IsElementOf(g::AlgMatElt[FldNum], gen::GrpSL2KGen) -> BoolElt, GrpFPEl
             if CmpVertices(o*h, o*g) eq -1 then
                 g_word := g_word*fp_sym[i];
                 g := g*x;
-                finish := false
+                finish := false;
                 break;
             end if;
         end for;
@@ -468,7 +500,7 @@ intrinsic IsElementOf(g::AlgMatElt[FldNum], gen::GrpSL2KGen) -> BoolElt, GrpFPEl
     if IsOne(g) or (gen`psl and IsOne(-g)) then
         return true, g_word^-1;
     elif gen`has_neg and IsOne(-g) then
-        return true, g_word^-1*G.(NumberOfGenerators(G));
+        return true, g_word^-1*G.(Ngens(G));
     else
         return false, _;
     end if;
@@ -482,7 +514,7 @@ intrinsic MapToFundamentalDomain(v::BTTVert, gen::GrpSL2KGen) -> BTTVert
 
     gen_sym, inv := symmetrize(gen`witness);
     G := gen`FPgrp;
-    fp_sym := symmetrize(Setseq(Generators(G)));
+    fp_sym := symmetrize([G.i : i in [1..Ngens(G)]]);
     g := One(gen`matalg);
     g_word := Id(G);
     w := v;
@@ -507,3 +539,5 @@ end intrinsic;
 /**
  * Discreteness algorithms
  */
+
+ 
