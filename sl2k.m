@@ -604,7 +604,7 @@ intrinsic IsDiscrete(gen::GrpSL2KGen) -> BoolElt, GrpSL2KGen, SetEnum[AlgMatElt]
 end intrinsic;
 
 intrinsic IsElementOf(g::AlgMatElt, tf_gp::GrpSL2KGen, cosets::SetEnum[AlgMatElt]) -> BoolElt, GrpFPElt, AlgMatElt
-{ Decide whether g is an element of a subgroup of SL(2, R) or PSL(2, R),
+{ Decide whether g is an element of a subgroup of SL(2, K) or PSL(2, K),
     given a torsion-free discrete subgroup and a set of coset representatives.
     If it is, then return (w, s) where s is a coset representative and w is a word in the reduced set
     such that w*s evaluates to g. }
