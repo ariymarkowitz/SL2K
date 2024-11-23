@@ -77,7 +77,7 @@ results1 := [time_ngens(G) : G in tests];
 
 // Time fundamental domain
 good := [G : G in tests[2] | IsDiscreteFree(G)][1..100];
-pointslist := [[[random_point(d, G) : i in [1..10]] : G in good] : d in [5, 10, 20, 40]];
+pointslist := [[[random_point(d, G) : i in [1..10]] : G in good] : d in [20, 50, 100, 200]];
 
 results2 := [time_fundamental_domain(good, points) : points in pointslist];
 
