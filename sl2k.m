@@ -593,7 +593,7 @@ intrinsic TorsionFreeSubgroup(gen::GrpSL2KGen) -> GrpSL2KGen, SetEnum[AlgMatElt]
 end intrinsic;
 
 intrinsic IsDiscrete(gen::GrpSL2KGen) -> BoolElt, GrpSL2KGen, SetEnum[AlgMatElt], RngIntElt
-{ Decide whether a subgroup of SL(2, R) or PSL(2, R) is discrete, returning a finite index subgroup and set of coset representatives if so. }
+{ Decide whether a subgroup of SL(2, K) or PSL(2, K) is discrete, returning a finite index subgroup and set of coset representatives if so. }
     H, S, p := TorsionFreeSubgroup(gen);
     RecognizeDiscreteFree(H);
     if IsDiscreteFree(H) then
